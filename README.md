@@ -1,3 +1,3 @@
 ## nftfactory
 
-Work in progress membership nft creation and management.
+Work in progress nft collection creation and management.
