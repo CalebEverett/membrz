@@ -3,13 +3,24 @@ seeds = true
 
 [provider]
 cluster = "localnet"
-wallet = "~/.config/solana/devnet.json"
+wallet = "~/.config/solana/caLeb.json"
+commitment = "confirmed"
 
 [programs.localnet]
-membrz = "GMpDFEBcv4M6hhNrKq9FcVF5NGtvvedjKZKG38T7opdH"
+nftfactory = "GMpDFEBcv4M6hhNrKq9FcVF5NGtvvedjKZKG38T7opdH"
 
 [workspace]
-members = ["programs/membrz"]
+members = ["programs/nftfactory"]
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 20000
+[test.validator]
+url = "devnet"
+[[test.validator.clone]]
+address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+[[test.validator.clone]]
+address = "PwDiXFxQsGra4sFFTT8r1QWRMd4vfumiWC1jfWNfdYT"
+

@@ -1,13 +1,13 @@
 import * as anchor from "@project-serum/anchor";
-import BN from "bn.js";
-import { Keypair } from "@solana/web3.js";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, Token } from "@solana/spl-token";
+import { MetadataProgram, DataV2, Metadata } from "@metaplex-foundation/mpl-token-metadata";
 import { expect } from 'chai';
+import { rpc } from "@project-serum/anchor/dist/cjs/utils";
 
-describe("membrz", () => {
+describe("nftfactory", () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.Provider.env());
-  const program = anchor.workspace.Membrz;
+  const program = anchor.workspace.Nftfactory;
 
   it('Creates a new user', async () => {
     const payer = program.provider.wallet;
@@ -44,41 +44,48 @@ describe("membrz", () => {
     expect(userAccount.groups[0].toString()).to.equal(group.toString());
   });
 
-  it('Creates an NFT', async () => {
+  it('Creates a master edition', async () => {
     const mint = anchor.web3.Keypair.generate();
-    const authority = program.provider.wallet.publicKey;
+    const payer = program.provider.wallet.publicKey;
 
-    const [pda, bump_seed] = (await anchor.web3.PublicKey.findProgramAddress([
+    const [authority, authBump] = (await anchor.web3.PublicKey.findProgramAddress([
       Buffer.from("pda"),
       program.programId.toBuffer()
     ], program.programId));
 
     const tokenAccount = (await anchor.web3.PublicKey.findProgramAddress([
-      pda.toBuffer(),
+      authority.toBuffer(),
       TOKEN_PROGRAM_ID.toBuffer(),
       mint.publicKey.toBuffer()
     ], ASSOCIATED_TOKEN_PROGRAM_ID))[0];
 
-    const tx = await program.rpc.createNft(bump_seed, {
-      accounts: {
-        authority,
-        mint: mint.publicKey,
-        tokenAccount: tokenAccount,
-        pda: pda,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-        systemProgram: anchor.web3.SystemProgram.programId,
-      },
-      signers: [mint]
+    const data = new DataV2({
+      name: "Collection",
+      symbol: "NFT",
+      uri: "https://uri",
+      sellerFeeBasisPoints: 1000,
+      creators: null,
+      collection: null,
+      uses: null
     });
 
-    const info = await program.provider.connection.getAccountInfo(mint.publicKey);
-    const data = Buffer.from(info.data);
-    let mintToken = new Token(program.provider.connection, mint.publicKey, TOKEN_PROGRAM_ID, mint)
+    const metadataAccount = await Metadata.getPDA(mint.publicKey);
 
+    const tx = await program.methods.createMasterEdition(data, true, authBump).accounts({
+      authority,
+      mint: mint.publicKey,
+      tokenAccount: tokenAccount,
+      metadataAccount,
+      metadataProgram: MetadataProgram.PUBKEY,
+
+    }).signers([mint]).rpc();
+
+    const accountInfo = await Metadata.getInfo(program.provider.connection, metadataAccount);
+    const accountDecoded = new Metadata(metadataAccount, accountInfo);
+    console.log(accountDecoded.data)
   });
 
 });
+
 
 
