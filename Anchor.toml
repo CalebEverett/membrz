@@ -7,7 +7,7 @@ wallet = "~/.config/solana/caLeb.json"
 commitment = "confirmed"
 
 [programs.localnet]
-nftfactory = "GMpDFEBcv4M6hhNrKq9FcVF5NGtvvedjKZKG38T7opdH"
+nftfactory = "H7DywsB6L4kiz3tJaGJ38eNjgnrdGkmbyeXdVaPE27Fb"
 
 [workspace]
 members = ["programs/nftfactory"]

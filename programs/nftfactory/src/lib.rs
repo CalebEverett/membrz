@@ -6,7 +6,7 @@ use anchor_spl::{
 };
 use mpl_token_metadata::state::{Collection, Creator, DataV2, UseMethod, Uses};
 
-declare_id!("GMpDFEBcv4M6hhNrKq9FcVF5NGtvvedjKZKG38T7opdH");
+declare_id!("H7DywsB6L4kiz3tJaGJ38eNjgnrdGkmbyeXdVaPE27Fb");
 
 #[program]
 pub mod nftfactory {
@@ -14,6 +14,12 @@ pub mod nftfactory {
 
     pub fn create_user(_ctx: Context<CreateUser>) -> ProgramResult {
         msg!("Create user");
+
+        Ok(())
+    }
+
+    pub fn delete_user(_ctx: Context<DeleteUser>) -> ProgramResult {
+        msg!("Delete user");
 
         Ok(())
     }
@@ -31,7 +37,7 @@ pub mod nftfactory {
         ctx: Context<CreateMasterEdition>,
         data: AnchorDataV2,
         is_mutable: bool,
-        auth_bump: u8,
+        max_supply: Option<u64>,
     ) -> ProgramResult {
         msg!("Create master edition");
 
@@ -41,11 +47,7 @@ pub mod nftfactory {
             authority: ctx.accounts.authority.to_account_info(),
         };
 
-        let auth_seeds = [
-            "pda".as_bytes(),
-            &program::Nftfactory::id().to_bytes(),
-            &[auth_bump],
-        ];
+        let auth_seeds = ["auth".as_bytes(), &[ctx.bumps["authority"]]];
 
         token::mint_to(
             CpiContext::new_with_signer(
@@ -56,32 +58,57 @@ pub mod nftfactory {
             1,
         )?;
 
-        msg!(&ctx
-            .accounts
-            .metadata_program
-            .to_account_info()
-            .key
-            .to_string());
-
-        let create_metadata_ctx = CreateMetaDataAccountsV2 {
-            payer: ctx.accounts.payer.clone(),
-            metadata_account: ctx.accounts.metadata_account.to_account_info(),
-            mint: ctx.accounts.mint.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
-            rent: ctx.accounts.rent.to_account_info(),
-        };
-
         create_metadata_accounts_v2(
             CpiContext::new_with_signer(
                 ctx.accounts.metadata_program.to_account_info(),
-                create_metadata_ctx,
+                ctx.accounts.clone(),
                 &[&auth_seeds],
             ),
             false,
             is_mutable,
             data.into(),
         )?;
-        msg!("finito");
+
+        create_master_edition_v3(
+            CpiContext::new_with_signer(
+                ctx.accounts.metadata_program.to_account_info(),
+                ctx.accounts.clone(),
+                &[&auth_seeds],
+            ),
+            max_supply,
+        )?;
+        Ok(())
+    }
+
+    pub fn burn_edition(ctx: Context<BurnEdition>) -> ProgramResult {
+        let burn_ctx = token::Burn {
+            mint: ctx.accounts.mint.to_account_info(),
+            to: ctx.accounts.token_account.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        };
+
+        let auth_seeds = ["auth".as_bytes(), &[ctx.bumps["authority"]]];
+
+        token::burn(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                burn_ctx,
+                &[&auth_seeds],
+            ),
+            1,
+        )?;
+
+        let burn_ctx = token::CloseAccount {
+            account: ctx.accounts.token_account.to_account_info(),
+            destination: ctx.accounts.payer.to_account_info(),
+            authority: ctx.accounts.authority.to_account_info(),
+        };
+
+        token::close_account(CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            burn_ctx,
+            &[&auth_seeds],
+        ))?;
         Ok(())
     }
 }
@@ -127,22 +154,48 @@ impl Group {
     const LEN: usize = 8 + 32 + 4 + 5 * 32;
 }
 
-#[derive(Accounts)]
+#[derive(Accounts, Clone)]
 pub struct CreateMasterEdition<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(seeds = ["auth".as_bytes()], bump)]
     pub authority: AccountInfo<'info>,
-    #[account(init, payer = payer, mint::decimals = 0, mint::authority =  authority, mint::freeze_authority = authority)]
+    #[account(init, payer = payer, mint::decimals = 0, mint::authority = authority, mint::freeze_authority = authority)]
     pub mint: Account<'info, Mint>,
     #[account(init, payer = payer, associated_token::mint = mint, associated_token::authority = authority)]
     pub token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub metadata_account: AccountInfo<'info>,
+    #[account(mut)]
+    pub edition_account: AccountInfo<'info>,
     pub metadata_program: Program<'info, TokenMetadata>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub rent: Sysvar<'info, Rent>,
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts, Clone)]
+pub struct BurnEdition<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = ["auth".as_bytes()], bump)]
+    pub authority: AccountInfo<'info>,
+    #[account(mut)]
+    pub mint: Account<'info, Mint>,
+    #[account(mut)]
+    pub token_account: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts, Clone)]
+pub struct DeleteUser<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, close = payer, seeds = [payer.key.as_ref()], bump)]
+    account: Account<'info, User>,
+    system_program: Program<'info, System>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, PartialEq, Debug, Clone)]
@@ -247,7 +300,7 @@ impl From<AnchorCollection> for Collection {
 }
 
 pub fn create_metadata_accounts_v2<'a, 'b, 'c, 'info>(
-    ctx: CpiContext<'a, 'b, 'c, 'info, CreateMetaDataAccountsV2<'info>>,
+    ctx: CpiContext<'a, 'b, 'c, 'info, CreateMasterEdition<'info>>,
     update_authority_is_signer: bool,
     is_mutable: bool,
     data: DataV2,
@@ -255,7 +308,7 @@ pub fn create_metadata_accounts_v2<'a, 'b, 'c, 'info>(
     let ix = mpl_token_metadata::instruction::create_metadata_accounts_v2(
         mpl_token_metadata::ID.clone(),
         ctx.accounts.metadata_account.key.clone(),
-        ctx.accounts.mint.key.clone(),
+        ctx.accounts.mint.to_account_info().key(),
         ctx.accounts.authority.key.clone(),
         ctx.accounts.payer.key.clone(),
         ctx.accounts.authority.key.clone(),
@@ -273,24 +326,45 @@ pub fn create_metadata_accounts_v2<'a, 'b, 'c, 'info>(
         &ix,
         &[
             ctx.accounts.metadata_account,
-            ctx.accounts.mint,
+            ctx.accounts.mint.to_account_info(),
             ctx.accounts.authority.clone(),
             ctx.accounts.payer.to_account_info(),
-            ctx.accounts.authority,
-            ctx.accounts.rent,
+            ctx.accounts.authority.clone(),
+            ctx.accounts.system_program.to_account_info(),
+            ctx.accounts.rent.to_account_info(),
         ],
         ctx.signer_seeds,
     )
 }
 
-#[derive(Accounts)]
-pub struct CreateMetaDataAccountsV2<'info> {
-    #[account(mut)]
-    pub payer: Signer<'info>,
-    pub metadata_account: AccountInfo<'info>,
-    pub mint: AccountInfo<'info>,
-    pub authority: AccountInfo<'info>,
-    pub rent: AccountInfo<'info>,
+pub fn create_master_edition_v3<'a, 'b, 'c, 'info>(
+    ctx: CpiContext<'a, 'b, 'c, 'info, CreateMasterEdition<'info>>,
+    max_supply: Option<u64>,
+) -> ProgramResult {
+    let ix = mpl_token_metadata::instruction::create_master_edition_v3(
+        mpl_token_metadata::ID.clone(),
+        ctx.accounts.edition_account.key.clone(),
+        ctx.accounts.mint.to_account_info().key(),
+        ctx.accounts.authority.key.clone(),
+        ctx.accounts.authority.key.clone(),
+        ctx.accounts.metadata_account.key.clone(),
+        ctx.accounts.payer.key.clone(),
+        max_supply,
+    );
+    anchor_lang::solana_program::program::invoke_signed(
+        &ix,
+        &[
+            ctx.accounts.edition_account,
+            ctx.accounts.metadata_account,
+            ctx.accounts.mint.to_account_info(),
+            ctx.accounts.authority.clone(),
+            ctx.accounts.payer.to_account_info(),
+            ctx.accounts.authority,
+            ctx.accounts.rent.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+        ],
+        ctx.signer_seeds,
+    )
 }
 
 #[derive(Clone)]

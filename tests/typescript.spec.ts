@@ -1,8 +1,10 @@
 import * as anchor from "@project-serum/anchor";
 import { ASSOCIATED_TOKEN_PROGRAM_ID, TOKEN_PROGRAM_ID, Token } from "@solana/spl-token";
-import { MetadataProgram, DataV2, Metadata } from "@metaplex-foundation/mpl-token-metadata";
-import { expect } from 'chai';
-import { rpc } from "@project-serum/anchor/dist/cjs/utils";
+import { MetadataProgram, DataV2, Metadata, MasterEdition } from "@metaplex-foundation/mpl-token-metadata";
+var chai = require("chai");
+var chaiAsPromised = require("chai-as-promised");
+chai.use(chaiAsPromised);
+var expect = chai.expect;
 
 describe("nftfactory", () => {
   // Configure the client to use the local cluster.
@@ -48,9 +50,8 @@ describe("nftfactory", () => {
     const mint = anchor.web3.Keypair.generate();
     const payer = program.provider.wallet.publicKey;
 
-    const [authority, authBump] = (await anchor.web3.PublicKey.findProgramAddress([
-      Buffer.from("pda"),
-      program.programId.toBuffer()
+    const [authority] = (await anchor.web3.PublicKey.findProgramAddress([
+      Buffer.from("auth"),
     ], program.programId));
 
     const tokenAccount = (await anchor.web3.PublicKey.findProgramAddress([
@@ -70,22 +71,45 @@ describe("nftfactory", () => {
     });
 
     const metadataAccount = await Metadata.getPDA(mint.publicKey);
+    const editionAccount = await MasterEdition.getPDA(mint.publicKey);
 
-    const tx = await program.methods.createMasterEdition(data, true, authBump).accounts({
+    const tx0 = await program.methods.createMasterEdition(data, true, null).accounts({
       authority,
       mint: mint.publicKey,
       tokenAccount: tokenAccount,
       metadataAccount,
+      editionAccount,
       metadataProgram: MetadataProgram.PUBKEY,
 
     }).signers([mint]).rpc();
 
+    let token = new Token(program.provider.connection, mint.publicKey, TOKEN_PROGRAM_ID, payer);
+    let supply = (await token.getMintInfo()).supply;
+
     const accountInfo = await Metadata.getInfo(program.provider.connection, metadataAccount);
     const accountDecoded = new Metadata(metadataAccount, accountInfo);
     console.log(accountDecoded.data)
+
+    const tx1 = await program.methods.burnEdition().accounts({
+      authority,
+      mint: mint.publicKey,
+      tokenAccount: tokenAccount,
+      metadataAccount,
+      editionAccount,
+      metadataProgram: MetadataProgram.PUBKEY,
+
+    }).rpc();
+
+    console.log((await token.getMintInfo()).supply);
+    await expect(token.getAccountInfo(tokenAccount)).to.be.rejectedWith(Error);
+
+  });
+
+  it('Deletes a user', async () => {
+    const payer = program.provider.wallet;
+    const user = (await anchor.web3.PublicKey.findProgramAddress([payer.publicKey.toBuffer()], program.programId))[0];
+    const tx = await program.methods.deleteUser().rpc();
+    await expect(program.account.user.fetch(user)).to.be.rejectedWith(Error);
   });
 
 });
-
-
-
